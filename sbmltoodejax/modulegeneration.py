@@ -556,16 +556,16 @@ def GenerateModel(modelData, outputFilePath,
     # ================================================================================================================================
 
     outputFile.write("class " + ModelRolloutName + "(eqx.Module):\n")
-    outputFile.write("\ty_indexes: dict = eqx.static_field()\n")
-    outputFile.write("\tw_indexes: dict = eqx.static_field()\n")
-    outputFile.write("\tc_indexes: dict = eqx.static_field()\n")
+    outputFile.write("\ty_indexes: dict = eqx.field(static=True)\n")
+    outputFile.write("\tw_indexes: dict = eqx.field(static=True)\n")
+    outputFile.write("\tc_indexes: dict = eqx.field(static=True)\n")
     outputFile.write(f"\tratefunc: {RateofSpeciesChangeName}\n")
     outputFile.write(f"\tassignmentfunc: {AssignmentRuleName}\n")
     if initialAssignments:
         outputFile.write(f"\tinitialassignmentfunc: {InitialAssignmentName}\n")
     outputFile.write(f"\tode_term: diffrax.ODETerm\n")
-    outputFile.write("\tsolver: diffrax.AbstractERK = eqx.static_field()\n")
-    outputFile.write("\titerative_solve: bool = eqx.static_field()\n\n")
+    outputFile.write("\tsolver: diffrax.AbstractERK = eqx.field(static=True)\n")
+    outputFile.write("\titerative_solve: bool = eqx.field(static=True)\n\n")
     
 
     outputFile.write(f"\tdef __init__(self, "
