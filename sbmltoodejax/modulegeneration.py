@@ -7,6 +7,7 @@ import sys
 def GenerateModel(modelData, outputFilePath,
                   RateofSpeciesChangeName: str ='RateofSpeciesChange',
                   AssignmentRuleName: str='AssignmentRule',
+                  InitialAssignmentName: str='InitialAssignment',
                   ModelRolloutName: str='ModelRollout',
                   vary_constant_reactants: bool = False,
                   vary_boundary_reactants: bool = False,
@@ -34,6 +35,8 @@ def GenerateModel(modelData, outputFilePath,
         RateofSpeciesChangeName (str, optional): The name of the RateofSpeciesChange module defined in the resulting python file. Default to 'RateofSpeciesChange'.
 
         AssignmentRuleName (str): The name of the AssignmentRule module defined in the resulting python file. Default to 'AssignmentRule'.
+
+        InitialAssignmentName (str): The name of the InitialAssignment module defined in the resulting python file. Default to 'InitialAssignment'.
 
         ModelRolloutName (str): The name of the ModelRollout module defined in the resulting python file. Default to'ModelRollout'.
 
@@ -293,8 +296,6 @@ def GenerateModel(modelData, outputFilePath,
     # ================================================================================================================================
 
     ruleDefinedVars = [rule.variable for rule in assignmentRules.values()]
-    for key, assignment in initialAssignments.items():
-        ruleDefinedVars.append(assignment.variable)
 
     for key, rule in assignmentRules.items():
         rule.dependents = []
@@ -304,15 +305,6 @@ def GenerateModel(modelData, outputFilePath,
         for i in range(originalLen):
             if rule.dependents[originalLen - i - 1] not in ruleDefinedVars:
                 rule.dependents.pop(originalLen - i - 1)
-
-    for key, assignment in initialAssignments.items():
-        assignment.dependents = []
-        for match in re.finditer(r'\b[a-zA-Z_]\w*', assignment.math):  # look for variable names
-            assignment.dependents.append(assignment.math[match.start():match.end()])
-        originalLen = len(assignment.dependents)
-        for i in range(originalLen):
-            if assignment.dependents[originalLen - i - 1] not in ruleDefinedVars:
-                assignment.dependents.pop(originalLen - i - 1)
 
     while True:
         continueVar = False
@@ -339,44 +331,12 @@ def GenerateModel(modelData, outputFilePath,
             elif not rule.dependents == None:
                 breakVar = False
 
-        if not continueVar:
-            for key, assignment in initialAssignments.items():
-                if assignment.dependents == []:
-                    var_amount = eval(ParseRHS(assignment.math, yvar="y0", wvar="w0", cvar="c"))
-                    if assignment.variable in species and not (
-                    species[assignment.variable].hasOnlySubstanceUnits):
-                        var_amount *= compartments[species[assignment.variable].compartment].size
-                    if isinstance(var_amount, jnp.ndarray):
-                        var_amount = var_amount.item()
-                    if assignment.variable in y_indexes:
-                        y0[y_indexes[assignment.variable]] = var_amount
-                    elif assignment.variable in w_indexes:
-                        w0[w_indexes[assignment.variable]] = var_amount
-                    elif assignment.variable in c_indexes:
-                        c[c_indexes[assignment.variable]] = var_amount
-                    else:
-                        raise ValueError("Assignment variable is not in y, w nor c")
-                    varDefinedThisLoop = assignment.variable
-                    assignment.dependents = None
-                    continueVar = True
-                    breakVar = False
-                    break
-                elif not assignment.dependents == None:
-                    breakVar = False
-
         for rule in assignmentRules.values():
             if not rule.dependents == None:
                 originalLen = len(rule.dependents)
                 for i in range(originalLen):
                     if rule.dependents[originalLen - i - 1] == varDefinedThisLoop:
                         rule.dependents.pop(originalLen - i - 1)
-
-        for assignment in initialAssignments.values():
-            if not assignment.dependents == None:
-                originalLen = len(assignment.dependents)
-                for i in range(originalLen):
-                    if assignment.dependents[originalLen - i - 1] == varDefinedThisLoop:
-                        assignment.dependents.pop(originalLen - i - 1)
 
         if continueVar:
             continue
@@ -515,12 +475,94 @@ def GenerateModel(modelData, outputFilePath,
 
     # ================================================================================================================================
 
+    # Generate InitialAssignment class if there are initial assignments
+    if initialAssignments:
+        outputFile.write("class " + InitialAssignmentName + "(eqx.Module):\n")
+        outputFile.write("\t@jit\n")
+        outputFile.write("\tdef __call__(self, y0, w0, c):\n")
+
+        # Reset dependents for initial assignments
+        initialAssignmentVars = [assignment.variable for assignment in initialAssignments.values()]
+        
+        # Create a copy of initial assignments to avoid modifying the original during iteration
+        temp_assignments = {}
+        for key, assignment in initialAssignments.items():
+            temp_assignments[key] = assignment
+            temp_assignments[key].dependents = []
+            for match in re.finditer(r'\b[a-zA-Z_]\w*', assignment.math):  # look for variable names
+                var_name = assignment.math[match.start():match.end()]
+                temp_assignments[key].dependents.append(var_name)
+            
+            # Only keep dependencies that are other initial assignment variables
+            # Initial assignments can depend on constants (in c), but those don't create dependency cycles
+            originalLen = len(temp_assignments[key].dependents)
+            for i in range(originalLen):
+                if temp_assignments[key].dependents[originalLen - i - 1] not in initialAssignmentVars:
+                    temp_assignments[key].dependents.pop(originalLen - i - 1)
+
+        # Generate initial assignments in dependency order
+        while True:
+            continueVar = False
+            breakVar = True
+            varDefinedThisLoop = None
+            
+            for key, assignment in temp_assignments.items():
+                if assignment.dependents == []:
+                    # Generate the assignment
+                    if assignment.variable in y_indexes:
+                        outputFile.write(f"\t\ty0 = y0.at[{y_indexes[assignment.variable]}].set(")
+                    elif assignment.variable in w_indexes:
+                        outputFile.write(f"\t\tw0 = w0.at[{w_indexes[assignment.variable]}].set(")
+                    elif assignment.variable in c_indexes:
+                        outputFile.write(f"\t\tc = c.at[{c_indexes[assignment.variable]}].set(")
+                    else:
+                        # Skip if variable is not in any index
+                        assignment.dependents = None
+                        continue
+                    
+                    # Add compartment multiplication if needed
+                    if assignment.variable in species and not species[assignment.variable].hasOnlySubstanceUnits:
+                        outputFile.write(f"{compartments[species[assignment.variable].compartment].size} * ")
+                    
+                    # Generate the RHS
+                    assignmentRHS = ParseRHS(assignment.math, yvar="y0", wvar="w0", cvar="c", tvar="0.0")
+                    outputFile.write(f"{assignmentRHS})\n\n")
+                    
+                    varDefinedThisLoop = assignment.variable
+                    assignment.dependents = None
+                    continueVar = True
+                    breakVar = False
+                    break
+                elif assignment.dependents is not None:
+                    breakVar = False
+
+            # Update dependencies
+            for assignment in temp_assignments.values():
+                if assignment.dependents is not None:
+                    originalLen = len(assignment.dependents)
+                    for i in range(originalLen):
+                        if assignment.dependents[originalLen - i - 1] == varDefinedThisLoop:
+                            assignment.dependents.pop(originalLen - i - 1)
+
+            if continueVar:
+                continue
+            elif breakVar:
+                break
+            else:
+                raise Exception('Algebraic Loop in InitialAssignments')
+
+        outputFile.write("\t\treturn y0, w0, c\n\n")
+
+    # ================================================================================================================================
+
     outputFile.write("class " + ModelRolloutName + "(eqx.Module):\n")
     outputFile.write("\ty_indexes: dict = eqx.static_field()\n")
     outputFile.write("\tw_indexes: dict = eqx.static_field()\n")
     outputFile.write("\tc_indexes: dict = eqx.static_field()\n")
     outputFile.write(f"\tratefunc: {RateofSpeciesChangeName}\n")
     outputFile.write(f"\tassignmentfunc: {AssignmentRuleName}\n")
+    if initialAssignments:
+        outputFile.write(f"\tinitialassignmentfunc: {InitialAssignmentName}\n")
     outputFile.write(f"\tode_term: diffrax.ODETerm\n")
     outputFile.write("\tsolver: diffrax.AbstractERK = eqx.static_field()\n")
     outputFile.write("\titerative_solve: bool = eqx.static_field()\n\n")
@@ -537,7 +579,10 @@ def GenerateModel(modelData, outputFilePath,
     outputFile.write("\t\tself.c_indexes = c_indexes\n\n")
 
     outputFile.write(f"\t\tself.ratefunc = {RateofSpeciesChangeName}()\n")
-    outputFile.write(f"\t\tself.assignmentfunc = {AssignmentRuleName}()\n\n")
+    outputFile.write(f"\t\tself.assignmentfunc = {AssignmentRuleName}()\n")
+    if initialAssignments:
+        outputFile.write(f"\t\tself.initialassignmentfunc = {InitialAssignmentName}()\n")
+    outputFile.write("\n")
 
     outputFile.write("\t\tdef ode_func(t, y, args):\n")
     outputFile.write("\t\t\tw, c = args\n")
@@ -566,10 +611,17 @@ def GenerateModel(modelData, outputFilePath,
     outputFile.write(f"\tdef __call__(self, t1,"
                      f"y0=jnp.array({y0}), "
                      f"w0=jnp.array({w0}), "
-                     f"c=jnp.array({c}), "
+                     f"c0=jnp.array({c}), "
                      f"t0={t0}, deltaT={deltaT}, "
                      f"stepsize_controller=diffrax.PIDController(atol={atol}, rtol={rtol}), max_steps={max_steps}"
                      f"):\n\n")
+    
+    if initialAssignments:
+        outputFile.write("\t\t# Apply initial assignments\n")
+        outputFile.write("\t\ty0, w0, c = self.initialassignmentfunc(y0, w0, c0)\n\n")
+    else:
+        outputFile.write("\t\t# No initial assignments, use original c\n")
+        outputFile.write("\t\tc = c0\n\n")
     
     outputFile.write("\t\t# Number of steps\n")
     outputFile.write("\t\tn_steps = int(t1 / deltaT)\n\n")
