@@ -613,6 +613,7 @@ def GenerateModel(modelData, outputFilePath,
                      f"w0=jnp.array({w0}), "
                      f"c0=jnp.array({c}), "
                      f"t0={t0}, deltaT={deltaT}, "
+                     f"ts=None, "
                      f"stepsize_controller=diffrax.PIDController(atol={atol}, rtol={rtol}), max_steps={max_steps}"
                      f"):\n\n")
     
@@ -637,12 +638,12 @@ def GenerateModel(modelData, outputFilePath,
     outputFile.write("\t\t\tsol = diffrax.diffeqsolve(\n")
     outputFile.write("\t\t\t\tself.ode_term,\n")
     outputFile.write("\t\t\t\tself.solver,\n")
-    outputFile.write("\t\t\t\tt0=t0,\n")
-    outputFile.write("\t\t\t\tt1=t1,\n")
+    outputFile.write("\t\t\t\tts[0] if ts is not None else t0,\n")
+    outputFile.write("\t\t\t\tts[-1] if ts is not None else t1,\n")
     outputFile.write("\t\t\t\tdt0=deltaT,\n")
     outputFile.write("\t\t\t\ty0=y0,\n")
     outputFile.write("\t\t\t\targs=(w0, c),\n")
-    outputFile.write("\t\t\t\tsaveat=diffrax.SaveAt(ts=jnp.linspace(t0, t1, n_steps)),\n")
+    outputFile.write("\t\t\t\tsaveat=diffrax.SaveAt(ts=ts if ts is not None else jnp.linspace(t0, t1, n_steps)),\n")
     outputFile.write("\t\t\t\tstepsize_controller=stepsize_controller,\n")
     outputFile.write("\t\t\t\tmax_steps=max_steps\n")
     outputFile.write("\t\t\t)\n\n")
