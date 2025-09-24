@@ -655,7 +655,7 @@ def GenerateModel(modelData, outputFilePath,
 
     outputFile.write("\t\tys = jnp.moveaxis(ys, 0, -1) #(n_species, n_steps)\n")
     outputFile.write("\t\tws = jnp.moveaxis(ws, 0, -1) #(n_params, n_steps)\n")
-    outputFile.write("\t\treturn ys, ws, ts\n\n")
+    outputFile.write("\t\treturn ys, ws, ts, c\n\n")
 
     # ================================================================================================================================
     outputFile.close()
