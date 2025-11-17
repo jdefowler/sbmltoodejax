@@ -86,7 +86,7 @@ def GenerateModel(modelData, outputFilePath,
                  'ln': 'jnp.log',
                  'log': 'jnp.log10',
                  'factorial': 'jaxfuncs.factorial',
-                 'sqrt': 'no.sqrt',
+                 'sqrt': 'jnp.sqrt',
 
                  'eq': 'jnp.equal',
                  'neq': 'jnp.not_equal',
