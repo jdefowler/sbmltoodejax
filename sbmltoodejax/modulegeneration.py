@@ -67,7 +67,8 @@ def GenerateModel(modelData, outputFilePath,
     compartments = modelData.compartments
     for k, v in compartments.items():
         if not v.isConstant:
-            raise NotImplementedError("Varying compartment size is not handled")
+            print('Warining! Varying compartment size is not handled.')
+            # raise NotImplementedError("Varying compartment size is not handled")
     species = modelData.species
     reactions = modelData.reactions
     functions = modelData.functions
@@ -483,7 +484,7 @@ def GenerateModel(modelData, outputFilePath,
 
         # Reset dependents for initial assignments
         initialAssignmentVars = [assignment.variable for assignment in initialAssignments.values()]
-        
+
         # Create a copy of initial assignments to avoid modifying the original during iteration
         temp_assignments = {}
         for key, assignment in initialAssignments.items():
@@ -492,7 +493,7 @@ def GenerateModel(modelData, outputFilePath,
             for match in re.finditer(r'\b[a-zA-Z_]\w*', assignment.math):  # look for variable names
                 var_name = assignment.math[match.start():match.end()]
                 temp_assignments[key].dependents.append(var_name)
-            
+
             # Only keep dependencies that are other initial assignment variables
             # Initial assignments can depend on constants (in c), but those don't create dependency cycles
             originalLen = len(temp_assignments[key].dependents)
@@ -505,7 +506,7 @@ def GenerateModel(modelData, outputFilePath,
             continueVar = False
             breakVar = True
             varDefinedThisLoop = None
-            
+
             for key, assignment in temp_assignments.items():
                 if assignment.dependents == []:
                     # Generate the assignment
@@ -519,15 +520,15 @@ def GenerateModel(modelData, outputFilePath,
                         # Skip if variable is not in any index
                         assignment.dependents = None
                         continue
-                    
+
                     # Add compartment multiplication if needed
                     if assignment.variable in species and not species[assignment.variable].hasOnlySubstanceUnits:
                         outputFile.write(f"{compartments[species[assignment.variable].compartment].size} * ")
-                    
+
                     # Generate the RHS
                     assignmentRHS = ParseRHS(assignment.math, yvar="y0", wvar="w0", cvar="c", tvar="0.0")
                     outputFile.write(f"{assignmentRHS})\n\n")
-                    
+
                     varDefinedThisLoop = assignment.variable
                     assignment.dependents = None
                     continueVar = True
@@ -566,14 +567,14 @@ def GenerateModel(modelData, outputFilePath,
     outputFile.write(f"\tode_term: diffrax.ODETerm\n")
     outputFile.write("\tsolver: diffrax.AbstractERK = eqx.field(static=True)\n")
     outputFile.write("\titerative_solve: bool = eqx.field(static=True)\n\n")
-    
+
 
     outputFile.write(f"\tdef __init__(self, "
                      f"y_indexes={y_indexes}, "
                      f"w_indexes={w_indexes}, "
                      f"c_indexes={c_indexes}, "
                      f"solver=diffrax.{diffrax_solver}(), iterative_solve={iterative_solve}):\n\n")
-    
+
     outputFile.write("\t\tself.y_indexes = y_indexes\n")
     outputFile.write("\t\tself.w_indexes = w_indexes\n")
     outputFile.write("\t\tself.c_indexes = c_indexes\n\n")
@@ -588,16 +589,16 @@ def GenerateModel(modelData, outputFilePath,
     outputFile.write("\t\t\tw, c = args\n")
     outputFile.write("\t\t\t# Update w using the assignment rule\n")
     outputFile.write("\t\t\tw = self.assignmentfunc(y, w, c, t)\n\n")
-    
+
     outputFile.write("\t\t\t# Calculate the rate of change\n")
     outputFile.write("\t\t\tdy_dt = self.ratefunc(y, t, w, c)\n\n")
-    
+
     outputFile.write("\t\t\treturn dy_dt\n\n")
-    
+
     outputFile.write("\t\tself.ode_term = diffrax.ODETerm(ode_func)\n")
     outputFile.write("\t\tself.solver = solver\n")
     outputFile.write("\t\tself.iterative_solve = iterative_solve\n\n")
-    
+
     outputFile.write("\t@eqx.filter_jit\n")
     outputFile.write(f"\tdef step(self, y, w, c, t, deltaT={deltaT}):\n")
     outputFile.write("\t\tt_new = t + deltaT\n")
@@ -616,16 +617,16 @@ def GenerateModel(modelData, outputFilePath,
                      f"ts=None, "
                      f"stepsize_controller=diffrax.PIDController(atol={atol}, rtol={rtol}), max_steps={max_steps}"
                      f"):\n\n")
-    
+
     if initialAssignments:
         outputFile.write("\t\t# Apply initial assignments\n")
         outputFile.write("\t\ty0, w0, c = self.initialassignmentfunc(y0, w0, c0)\n\n")
     else:
         outputFile.write("\t\t# No initial assignments, use original c\n")
         outputFile.write("\t\tc = c0\n\n")
-    
+
     outputFile.write("\t\t# Number of steps\n")
-    outputFile.write("\t\tn_steps = int(t1 / deltaT)\n\n")
+    outputFile.write("\t\tn_steps = jnp.floor(t1 / deltaT)\n\n")
 
     outputFile.write("\t\t# Solve the ODE system\n")
     outputFile.write("\t\tif self.iterative_solve:\n")
